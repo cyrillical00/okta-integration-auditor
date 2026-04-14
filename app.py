@@ -160,7 +160,15 @@ if connect:
                     st.session_state.okta_apps = apps
                     st.sidebar.success(f"Connected: {domain}")
                 except Exception as e:
-                    st.sidebar.error(f"Connection failed: {e}")
+                    code = getattr(getattr(e, "response", None), "status_code", None)
+                    if code == 401:
+                        st.sidebar.error("Connection failed: invalid API token.")
+                    elif code == 403:
+                        st.sidebar.error("Connection failed: token lacks required permissions.")
+                    elif code == 404:
+                        st.sidebar.error("Connection failed: Okta domain not found. Check format (yourorg.okta.com).")
+                    else:
+                        st.sidebar.error("Connection failed. Check your domain and API token.")
 
 if st.session_state.okta_connected and st.session_state.okta_apps:
     apps = st.session_state.okta_apps
