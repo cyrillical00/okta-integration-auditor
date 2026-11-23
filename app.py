@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from urllib.parse import quote
+from utils.export import csv_safe
 from utils.mock_data import get_mock_apps
 from utils.okta_client import fetch_okta_apps, normalize_live_apps, normalize_okta_domain, validate_okta
 
@@ -220,7 +221,7 @@ if st.session_state.okta_connected and st.session_state.okta_apps:
     with col1:
         st.download_button(
             "Download Full Audit as CSV",
-            data=df[display_cols].to_csv(index=False),
+            data=csv_safe(df[display_cols]).to_csv(index=False),
             file_name="okta_full_audit.csv",
             mime="text/csv",
         )
@@ -228,7 +229,7 @@ if st.session_state.okta_connected and st.session_state.okta_apps:
         remed = df[df["risk_label"].isin(["Critical", "High"])][display_cols]
         st.download_button(
             "Download Remediation List as CSV",
-            data=remed.to_csv(index=False),
+            data=csv_safe(remed).to_csv(index=False),
             file_name="okta_remediation.csv",
             mime="text/csv",
         )

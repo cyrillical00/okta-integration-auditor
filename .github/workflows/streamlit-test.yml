@@ -23,5 +23,6 @@ jobs:
           python -m py_compile app.py
           python -m py_compile utils/mock_data.py
           python -m py_compile utils/okta_client.py
+          python -m py_compile utils/export.py
       - name: Unit tests
         run: python -m unittest discover -s tests
