@@ -1,9 +1,9 @@
 import streamlit as st
-import requests
 import pandas as pd
-import time as time_module
 from datetime import datetime, timedelta
+from urllib.parse import quote
 from utils.mock_data import get_mock_apps
+from utils.okta_client import fetch_okta_apps, normalize_live_apps, normalize_okta_domain, validate_okta
 
 st.set_page_config(page_title="Okta Integration Auditor", page_icon="🔐", layout="wide")
 
@@ -22,20 +22,6 @@ else:
     okta_domain_input = "demo.okta.com"
     api_token_input = ""
     connect = True
-
-
-def okta_headers(token):
-    return {
-        "Authorization": f"SSWS {token}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-
-
-def validate_okta(domain, token):
-    r = requests.get(f"https://{domain}/api/v1/org", headers=okta_headers(token), timeout=10)
-    r.raise_for_status()
-    return r.json()
 
 
 def compute_risk_score(app):
@@ -85,52 +71,6 @@ def risk_label(score):
     return "Low"
 
 
-def fetch_okta_apps(domain, token):
-    apps = []
-    url = f"https://{domain}/api/v1/apps?limit=200"
-    while url:
-        r = requests.get(url, headers=okta_headers(token), timeout=15)
-        r.raise_for_status()
-        apps.extend(r.json())
-        url = None
-        for part in r.headers.get("Link", "").split(","):
-            if 'rel="next"' in part:
-                url = part.split(";")[0].strip().strip("<>")
-        time_module.sleep(0.05)
-    return apps
-
-
-def normalize_live_apps(raw_apps, domain, token):
-    results = []
-    for app in raw_apps:
-        features = app.get("features", [])
-        scim_enabled = "PUSH_USER" in features or "IMPORT_USER_SCHEMA" in features
-
-        try:
-            ur = requests.get(
-                f"https://{domain}/api/v1/apps/{app['id']}/users?limit=1",
-                headers=okta_headers(token),
-                timeout=10,
-            )
-            users_count = len(ur.json()) if ur.status_code == 200 else 0
-        except Exception:
-            users_count = 0
-
-        results.append({
-            "id": app["id"],
-            "name": app.get("label", "Unknown"),
-            "type": app.get("signOnMode", "Unknown"),
-            "status": app.get("status", "Unknown"),
-            "users": users_count,
-            "groups": 0,
-            "last_login": "Unknown",
-            "scim_enabled": scim_enabled,
-            "scim_status": "Active" if scim_enabled else "Not configured",
-        })
-        time_module.sleep(0.05)
-    return results
-
-
 # Session state
 for key in ("okta_connected", "okta_domain", "okta_apps"):
     if key not in st.session_state:
@@ -148,27 +88,34 @@ if connect:
         if not okta_domain_input or not api_token_input:
             st.sidebar.error("Enter both domain and API token.")
         else:
-            domain = okta_domain_input.replace("https://", "").replace("http://", "").strip("/")
-            with st.spinner("Connecting to Okta..."):
-                try:
-                    validate_okta(domain, api_token_input)
-                    with st.spinner("Fetching apps..."):
-                        raw = fetch_okta_apps(domain, api_token_input)
-                        apps = normalize_live_apps(raw, domain, api_token_input)
-                    st.session_state.okta_connected = True
-                    st.session_state.okta_domain = domain
-                    st.session_state.okta_apps = apps
-                    st.sidebar.success(f"Connected: {domain}")
-                except Exception as e:
-                    code = getattr(getattr(e, "response", None), "status_code", None)
-                    if code == 401:
-                        st.sidebar.error("Connection failed: invalid API token.")
-                    elif code == 403:
-                        st.sidebar.error("Connection failed: token lacks required permissions.")
-                    elif code == 404:
-                        st.sidebar.error("Connection failed: Okta domain not found. Check format (yourorg.okta.com).")
-                    else:
-                        st.sidebar.error("Connection failed. Check your domain and API token.")
+            # The server makes these requests with the visitor's token, so the
+            # host has to be an Okta one before anything is sent.
+            try:
+                domain = normalize_okta_domain(okta_domain_input)
+            except ValueError as exc:
+                domain = None
+                st.sidebar.error(str(exc))
+            if domain:
+                with st.spinner("Connecting to Okta..."):
+                    try:
+                        validate_okta(domain, api_token_input)
+                        with st.spinner("Fetching apps..."):
+                            raw = fetch_okta_apps(domain, api_token_input)
+                            apps = normalize_live_apps(raw, domain, api_token_input)
+                        st.session_state.okta_connected = True
+                        st.session_state.okta_domain = domain
+                        st.session_state.okta_apps = apps
+                        st.sidebar.success(f"Connected: {domain}")
+                    except Exception as e:
+                        code = getattr(getattr(e, "response", None), "status_code", None)
+                        if code == 401:
+                            st.sidebar.error("Connection failed: invalid API token.")
+                        elif code == 403:
+                            st.sidebar.error("Connection failed: token lacks required permissions.")
+                        elif code == 404:
+                            st.sidebar.error("Connection failed: Okta domain not found. Check format (yourorg.okta.com).")
+                        else:
+                            st.sidebar.error("Connection failed. Check your domain and API token.")
 
 if st.session_state.okta_connected and st.session_state.okta_apps:
     apps = st.session_state.okta_apps
@@ -266,7 +213,7 @@ if st.session_state.okta_connected and st.session_state.okta_apps:
             action = pick_action(row.get("risk_reasons", []))
             st.markdown(f"**Recommended action:** {action}")
             if domain != "demo.okta.com":
-                st.markdown(f"[Open in Okta Console](https://{domain}/admin/app/{row['id']}/general)")
+                st.markdown(f"[Open in Okta Console](https://{domain}/admin/app/{quote(str(row['id']), safe='')}/general)")
 
     st.subheader("Export")
     col1, col2, col3 = st.columns(3)
