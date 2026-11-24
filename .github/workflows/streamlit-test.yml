@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+# The job only reads the repository.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,3 +22,7 @@ jobs:
         run: |
           python -m py_compile app.py
           python -m py_compile utils/mock_data.py
+          python -m py_compile utils/okta_client.py
+          python -m py_compile utils/export.py
+      - name: Unit tests
+        run: python -m unittest discover -s tests
